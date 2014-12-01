@@ -383,10 +383,10 @@ module Fluent
       systems = @conf.elements.select { |e|
         e.name == 'system'
       }
-      # return if systems.empty?
-      # raise ConfigError, "<system> is duplicated. <system> should be only one" if systems.size > 1
+      return if systems.empty?
+      raise ConfigError, "<system> is duplicated. <system> should be only one" if systems.size > 1
 
-      # opt.merge!(SystemConfig.new(systems.first).to_opt)
+      opt.merge!(SystemConfig.new(systems.first).to_opt)
     ensure
       file.close
     end
