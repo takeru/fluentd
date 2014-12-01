@@ -105,8 +105,6 @@ module Fluent
       @chgroup = opt[:chgroup]
       @chuser = opt[:chuser]
 
-      apply_system_config(opt)
-
       @log_level = opt[:log_level]
       @suppress_interval = opt[:suppress_interval]
       @suppress_config_dump = opt[:suppress_config_dump]
@@ -128,6 +126,7 @@ module Fluent
         until @finished
           supervise do
             read_config
+            apply_system_config(opt = {})
             change_privilege
             init_engine
             install_main_process_signal_handlers
@@ -142,6 +141,7 @@ module Fluent
         $log.info "starting fluentd-#{Fluent::VERSION} without supervision"
         main_process do
           read_config
+          apply_system_config(opt = {})
           change_privilege
           init_engine
           install_main_process_signal_handlers
@@ -345,6 +345,7 @@ module Fluent
       elsif @inline_config
         @config_data << "\n" << @inline_config.gsub("\\n","\n")
       end
+      @conf = Fluent::Config.parse(@config_data, @config_fname, @config_basedir, @use_v1_config)
     end
 
     class SystemConfig
@@ -379,21 +380,19 @@ module Fluent
       # Create NULL file to avoid $log uninitialized problem before call @log.init
       file = File.open(File::NULL)
       $log = Fluent::Log.new(file, Log::LEVEL_INFO)
-      read_config
-      systems = Fluent::Config.parse(@config_data, @config_fname, @config_basedir, @use_v1_config).elements.select { |e|
+      systems = @conf.elements.select { |e|
         e.name == 'system'
       }
-      return if systems.empty?
-      raise ConfigError, "<system> is duplicated. <system> should be only one" if systems.size > 1
+      # return if systems.empty?
+      # raise ConfigError, "<system> is duplicated. <system> should be only one" if systems.size > 1
 
-      opt.merge!(SystemConfig.new(systems.first).to_opt)
+      # opt.merge!(SystemConfig.new(systems.first).to_opt)
     ensure
       file.close
     end
 
     def run_configure
-      conf = Fluent::Config.parse(@config_data, @config_fname, @config_basedir, @use_v1_config)
-      Fluent::Engine.run_configure(conf)
+      Fluent::Engine.run_configure(@conf)
     end
 
     def change_privilege
