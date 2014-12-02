@@ -199,10 +199,10 @@ module Fluent::Config
       test('.t') { assert_text_parsed_as('.t', '.t') }
       test('*t') { assert_text_parsed_as('*t', '*t') }
       test('@t') { assert_text_parsed_as('@t', '@t') }
-      test('{t') { assert_parse_error('{t') }  # '{' begins map
+      test('{t') { assert_text_parsed_as('{t', '{t') } # '{' begins map, but will be evaludated at Config.string_value
       test('t{') { assert_text_parsed_as('t{', 't{') }
       test('}t') { assert_text_parsed_as('}t', '}t') }
-      test('[t') { assert_parse_error('[t') }  # '[' begins array
+      test('[t') { assert_text_parsed_as('[t', '[t') } # '[' begins array, but will be evaluated at Config.string_value
       test('t[') { assert_text_parsed_as('t[', 't[') }
       test(']t') { assert_text_parsed_as(']t', ']t') }
       test('t:') { assert_text_parsed_as('t:', 't:') }
@@ -228,66 +228,6 @@ module Fluent::Config
       test('"#{"}"}"') { assert_text_parsed_as("}", '"#{"}"}"') }
       test('"#{#}"') { assert_parse_error('"#{#}"') }  # error in embedded ruby code
       test("\"\#{\n=begin\n}\"") { assert_parse_error("\"\#{\n=begin\n}\"") }  # error in embedded ruby code
-    end
-
-    sub_test_case 'array parsing' do
-      test('[]') { assert_text_parsed_as_json([], '[]') }
-      test('[1]') { assert_text_parsed_as_json([1], '[1]') }
-      test('[1,2]') { assert_text_parsed_as_json([1,2], '[1,2]') }
-      test('[1, 2]') { assert_text_parsed_as_json([1,2], '[1, 2]') }
-      test('[ 1 , 2 ]') { assert_text_parsed_as_json([1,2], '[ 1 , 2 ]') }
-      test('[1,2,]') { assert_parse_error('[1,2,]') } # TODO: Need trailing commas support?
-      test("[\n1\n,\n2\n]") { assert_text_parsed_as_json([1,2], "[\n1\n,\n2\n]") }
-      test('["a"]') { assert_text_parsed_as_json(["a"], '["a"]') }
-      test('["a","b"]') { assert_text_parsed_as_json(["a","b"], '["a","b"]') }
-      test('[ "a" , "b" ]') { assert_text_parsed_as_json(["a","b"], '[ "a" , "b" ]') }
-      test("[\n\"a\"\n,\n\"b\"\n]") { assert_text_parsed_as_json(["a","b"], "[\n\"a\"\n,\n\"b\"\n]") }
-      test('["ab","cd"]') { assert_text_parsed_as_json(["ab","cd"], '["ab","cd"]') }
-      json_array_with_js_comment = <<EOA
-[
- "a", // this is a
- "b", // this is b
- "c"  // this is c
-]
-EOA
-      test(json_array_with_js_comment) { assert_text_parsed_as_json(["a","b","c"], json_array_with_js_comment) }
-      json_array_with_comment = <<EOA
-[
- "a", # this is a
- "b", # this is b
- "c"  # this is c
-]
-EOA
-      test(json_array_with_comment) { assert_text_parsed_as_json(["a","b","c"], json_array_with_comment) }
-      json_array_with_tailing_comma = <<EOA
-[
- "a", # this is a
- "b", # this is b
- "c", # this is c
-]
-EOA
-      test(json_array_with_tailing_comma) { assert_parse_error(json_array_with_tailing_comma) }
-    end
-
-    sub_test_case 'map parsing' do
-      test('{}') { assert_text_parsed_as_json({}, '{}') }
-      test('{"a":1}') { assert_text_parsed_as_json({"a"=>1}, '{"a":1}') }
-      test('{"a":1,"b":2}') { assert_text_parsed_as_json({"a"=>1,"b"=>2}, '{"a":1,"b":2}') }
-      test('{ "a" : 1 , "b" : 2 }') { assert_text_parsed_as_json({"a"=>1,"b"=>2}, '{ "a" : 1 , "b" : 2 }') }
-      test('{"a":1,"b":2,}') { assert_parse_error('{"a":1,"b":2,}') } # TODO: Need trailing commas support?
-      test('{\n\"a\"\n:\n1\n,\n\"b\"\n:\n2\n}') { assert_text_parsed_as_json({"a"=>1,"b"=>2}, "{\n\"a\"\n:\n1\n,\n\"b\"\n:\n2\n}") }
-      test('{"a":"b"}') { assert_text_parsed_as_json({"a"=>"b"}, '{"a":"b"}') }
-      test('{"a":"b","c":"d"}') { assert_text_parsed_as_json({"a"=>"b","c"=>"d"}, '{"a":"b","c":"d"}') }
-      test('{ "a" : "b" , "c" : "d" }') { assert_text_parsed_as_json({"a"=>"b","c"=>"d"}, '{ "a" : "b" , "c" : "d" }') }
-      test('{\n\"a\"\n:\n\"b\"\n,\n\"c\"\n:\n\"d\"\n}') { assert_text_parsed_as_json({"a"=>"b","c"=>"d"}, "{\n\"a\"\n:\n\"b\"\n,\n\"c\"\n:\n\"d\"\n}") }
-      json_hash_with_comment = <<EOH
-{
- "a": 1, # this is a
- "b": 2, # this is b
- "c": 3  # this is c
-}
-EOH
-      test(json_hash_with_comment) { assert_text_parsed_as_json({"a"=>1,"b"=>2,"c"=>3}, json_hash_with_comment) }
     end
   end
 end

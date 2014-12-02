@@ -53,14 +53,7 @@ module Fluent
       def parse_literal(string_boundary_charset = LINE_END)
         spacing_without_comment
 
-        value = if skip(/\[/)
-                  scan_json(true)
-                elsif skip(/\{/)
-                  scan_json(false)
-                else
-                  scan_string(string_boundary_charset)
-                end
-        value
+        scan_string(string_boundary_charset)
       end
 
       def scan_string(string_boundary_charset = LINE_END)
@@ -178,65 +171,6 @@ module Fluent
         else  # symbols
           c
         end
-      end
-
-      def scan_json(is_array)
-        result = nil
-        # Yajl does not raise ParseError for imcomplete json string, like '[1', '{"h"', '{"h":' or '{"h1":1'
-        # This is the reason to use JSON module.
-
-        buffer = (is_array ? "[" : "{")
-        line_buffer = ""
-
-        until result
-          char = getch
-
-          break if char.nil?
-
-          if char == "#"
-            # If this is out of json string literals, this object can be parsed correctly
-            # '{"foo":"bar", #' -> '{"foo":"bar"}' (to check)
-            parsed = nil
-            begin
-              parsed = JSON.parse(buffer + line_buffer.rstrip.sub(/,$/, '') + (is_array ? "]" : "}"))
-            rescue JSON::ParserError => e
-              # This '#' is in json string literals
-            end
-
-            if parsed
-              # ignore chars as comment before newline
-              while (char = getch) != "\n"
-                # ignore comment char
-              end
-              buffer << line_buffer + "\n"
-              line_buffer = ""
-            else
-              # '#' is a char in json string
-              line_buffer << char
-            end
-
-            next # This char '#' MUST NOT terminate json object.
-          end
-
-          if char == "\n"
-            buffer << line_buffer + "\n"
-            line_buffer = ""
-            next
-          end
-
-          line_buffer << char
-          begin
-            result = JSON.parse(buffer + line_buffer)
-          rescue JSON::ParserError => e
-            # Incomplete json string yet
-          end
-        end
-
-        unless result
-          parse_error! "got incomplete JSON #{is_array ? 'array' : 'hash'} configuration"
-        end
-
-        JSON.dump(result)
       end
     end
   end
