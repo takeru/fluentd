@@ -147,7 +147,12 @@ module Fluent
       def call(text)
         m = @regexp.match(text)
         unless m
-          return nil, nil
+          if block_given?
+            yield nil, nil
+            return
+          else
+            return nil, nil
+          end
         end
 
         time = nil
@@ -170,7 +175,11 @@ module Fluent
 
         time ||= Engine.now
 
-        return time, record
+        if block_given?
+          yield time, record
+        else # keep backward compatibility. will be removed at v1
+          return time, record
+        end
       end
     end
 
@@ -202,9 +211,17 @@ module Fluent
           time = Engine.now
         end
 
-        return time, record
+        if block_given?
+          yield time, record
+        else
+          return time, record
+        end
       rescue Yajl::ParseError
-        return nil, nil
+        if block_given?
+          yield nil, nil
+        else
+          return nil, nil
+        end
       end
     end
 
@@ -267,7 +284,11 @@ module Fluent
       config_param :delimiter, :string, :default => "\t"
 
       def call(text)
-        return values_map(text.split(@delimiter))
+        if block_given?
+          yield values_map(text.split(@delimiter))
+        else
+          return values_map(text.split(@delimiter))
+        end
       end
     end
 
@@ -291,7 +312,11 @@ module Fluent
           values.push(value)
         end
 
-        return values_map(values)
+        if block_given?
+          yield values_map(values)
+        else
+          return values_map(values)
+        end
       end
     end
 
@@ -302,7 +327,11 @@ module Fluent
       end
 
       def call(text)
-        return values_map(CSV.parse_line(text))
+        if block_given?
+          yield values_map(CSV.parse_line(text))
+        else
+          return values_map(CSV.parse_line(text))
+        end
       end
     end
 
@@ -314,7 +343,11 @@ module Fluent
       def call(text)
         record = {}
         record[@message_key] = text
-        return Engine.now, record
+        if block_given?
+          yield Engine.now, record
+        else
+          return Engine.now, record
+        end
       end
     end
 
@@ -331,7 +364,12 @@ module Fluent
       def call(text)
         m = REGEXP.match(text)
         unless m
-          return nil, nil
+          if block_given?
+            yield nil, nil
+            return
+          else
+            return nil, nil
+          end
         end
 
         host = m['host']
@@ -369,7 +407,11 @@ module Fluent
           "agent" => agent,
         }
 
-        return time, record
+        if block_given?
+          yield time, record
+        else
+          return time, record
+        end
       end
     end
 
@@ -396,16 +438,24 @@ module Fluent
 
         if @format_firstline
           check_format_regexp(@format_firstline, 'format_firstline')
-          @regex = Regexp.new(@format_firstline[1..-2])
+          @firstline_regex = Regexp.new(@format_firstline[1..-2])
         end
       end
 
-      def call(text)
-        @parser.call(text)
+      def call(text, &block)
+        if block
+          @parser.call(text, &block)
+        else
+          @parser.call(text)
+        end
+      end
+
+      def has_firstline?
+        !!@format_firstline
       end
 
       def firstline?(text)
-        @regex.match(text)
+        @firstline_regex.match(text)
       end
 
       private
@@ -506,7 +556,6 @@ module Fluent
         end
 
         @parser = RegexpParser.new(regexp, conf)
-
       else
         # built-in template
         begin
@@ -524,8 +573,12 @@ module Fluent
       return true
     end
 
-    def parse(text)
-      return @parser.call(text)
+    def parse(text, &block)
+      if block
+        @parser.call(text, &block)
+      else # keep backward compatibility. Will be removed at v1
+        return @parser.call(text)
+      end
     end
   end
 end

@@ -139,7 +139,7 @@ module Fluent
     end
 
     def setup_watcher(path, pe)
-      tw = TailWatcher.new(path, @rotate_wait, pe, log, method(:update_watcher), &method(:receive_lines))
+      tw = TailWatcher.new(path, @rotate_wait, pe, log, @read_from_head, method(:update_watcher), &method(:receive_lines))
       tw.attach(@loop)
       tw
     end
@@ -168,7 +168,7 @@ module Fluent
         if tw
           tw.unwatched = unwatched
           if immediate
-            close_watcher(tw)
+            close_watcher(tw, false)
           else
             close_watcher_after_rotate_wait(tw)
           end
@@ -183,8 +183,12 @@ module Fluent
       close_watcher_after_rotate_wait(rotated_tw) if rotated_tw
     end
 
-    def close_watcher(tw)
-      tw.close
+    # TailWatcher#close is called by another thread at shutdown phase.
+    # It causes 'can't modify string; temporarily locked' error in IOHandler
+    # so adding close_io argument to avoid this problem.
+    # At shutdown, IOHandler's io will be released automatically after detached the event loop
+    def close_watcher(tw, close_io = true)
+      tw.close(close_io)
       flush_buffer(tw)
       if tw.unwatched && @pf
         @pf[tw.path].update_pos(PositionFile::UNWATCHED_POSITION)
@@ -199,17 +203,18 @@ module Fluent
     def flush_buffer(tw)
       if lb = tw.line_buffer
         lb.chomp!
-        time, record = parse_line(lb)
-        if time && record
-          tag = if @tag_prefix || @tag_suffix
-                  @tag_prefix + tw.tag + @tag_suffix
-                else
-                  @tag
-                end
-          Engine.emit(tag, time, record)
-        else
-          log.warn "got incomplete line at shutdown from #{tw.path}: #{lb.inspect}"
-        end
+        @parser.parse(lb) { |time, record|
+          if time && record
+            tag = if @tag_prefix || @tag_suffix
+                    @tag_prefix + tw.tag + @tag_suffix
+                  else
+                    @tag
+                  end
+            Engine.emit(tag, time, record)
+          else
+            log.warn "got incomplete line at shutdown from #{tw.path}: #{lb.inspect}"
+          end
+        }
       end
     end
 
@@ -236,19 +241,16 @@ module Fluent
       end
     end
 
-    def parse_line(line)
-      return @parser.parse(line)
-    end
-
     def convert_line_to_event(line, es)
       begin
         line.chomp!  # remove \n
-        time, record = parse_line(line)
-        if time && record
-          es.add(time, record)
-        else
-          log.warn "pattern not match: #{line.inspect}"
-        end
+        @parser.parse(line) { |time, record|
+          if time && record
+            es.add(time, record)
+          else
+            log.warn "pattern not match: #{line.inspect}"
+          end
+        }
       rescue => e
         log.warn line.dump, :error => e.to_s
         log.debug_backtrace(e.backtrace)
@@ -266,29 +268,43 @@ module Fluent
     def parse_multilines(lines, tail_watcher)
       lb = tail_watcher.line_buffer
       es = MultiEventStream.new
-      lines.each { |line|
-        if @parser.parser.firstline?(line)
-          if lb
-            convert_line_to_event(lb, es)
-          end
-          lb = line
-        else
-          if lb.nil?
-            log.warn "got incomplete line before first line from #{tail_watcher.path}: #{lb.inspect}"
+      if @parser.parser.has_firstline?
+        lines.each { |line|
+          if @parser.parser.firstline?(line)
+            if lb
+              convert_line_to_event(lb, es)
+            end
+            lb = line
           else
-            lb << line
+            if lb.nil?
+              log.warn "got incomplete line before first line from #{tail_watcher.path}: #{lb.inspect}"
+            else
+              lb << line
+            end
           end
+        }
+      else
+        lb ||= ''
+        lines.each do |line|
+          lb << line
+          @parser.parse(lb) { |time, record|
+            if time && record
+              convert_line_to_event(lb, es)
+              lb = ''
+            end
+          }
         end
-      }
+      end
       tail_watcher.line_buffer = lb
       es
     end
 
     class TailWatcher
-      def initialize(path, rotate_wait, pe, log, update_watcher, &receive_lines)
+      def initialize(path, rotate_wait, pe, log, read_from_head, update_watcher, &receive_lines)
         @path = path
         @rotate_wait = rotate_wait
         @pe = pe || MemoryPositionEntry.new
+        @read_from_head = read_from_head
         @receive_lines = receive_lines
         @update_watcher = update_watcher
 
@@ -323,8 +339,8 @@ module Fluent
         @stat_trigger.detach if @stat_trigger.attached?
       end
 
-      def close
-        if @io_handler
+      def close(close_io = true)
+        if close_io && @io_handler
           @io_handler.on_notify
           @io_handler.close
         end
@@ -369,7 +385,7 @@ module Fluent
               # seek to the end of the any files.
               # logs may duplicate without this seek because it's not sure the file is
               # existent file or rotated new file.
-              pos = fsize
+              pos = @read_from_head ? 0 : fsize
               @pe.update(inode, pos)
             end
             io.seek(pos)

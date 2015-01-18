@@ -13,11 +13,16 @@ class TailInputTest < Test::Unit::TestCase
 
   TMP_DIR = File.dirname(__FILE__) + "/../tmp/tail#{ENV['TEST_ENV_NUMBER']}"
 
-  COMMON_CONFIG = %[
+  CONFIG = %[
     path #{TMP_DIR}/tail.txt
     tag t1
     rotate_wait 2s
+  ]
+  COMMON_CONFIG = CONFIG + %[
     pos_file #{TMP_DIR}/tail.pos
+  ]
+  CONFIG_READ_FROM_HEAD = %[
+    read_from_head true
   ]
   SINGLE_LINE_CONFIG = %[
     format /(?<message>.*)/
@@ -35,6 +40,8 @@ class TailInputTest < Test::Unit::TestCase
     assert_equal 2, d.instance.rotate_wait
     assert_equal "#{TMP_DIR}/tail.pos", d.instance.pos_file
   end
+
+  # TODO: Should using more better approach instead of sleep wait
 
   def test_emit
     File.open("#{TMP_DIR}/tail.txt", "w") {|f|
@@ -56,8 +63,89 @@ class TailInputTest < Test::Unit::TestCase
 
     emits = d.emits
     assert_equal(true, emits.length > 0)
-    assert_equal({"message"=>"test3"}, emits[0][2])
-    assert_equal({"message"=>"test4"}, emits[1][2])
+    assert_equal({"message" => "test3"}, emits[0][2])
+    assert_equal({"message" => "test4"}, emits[1][2])
+  end
+
+  def test_emit_with_read_from_head
+    File.open("#{TMP_DIR}/tail.txt", "w") {|f|
+      f.puts "test1"
+      f.puts "test2"
+    }
+
+    d = create_driver(CONFIG_READ_FROM_HEAD + SINGLE_LINE_CONFIG)
+
+    d.run do
+      sleep 1
+
+      File.open("#{TMP_DIR}/tail.txt", "a") {|f|
+        f.puts "test3"
+        f.puts "test4"
+      }
+      sleep 1
+    end
+
+    emits = d.emits
+    assert(emits.length > 0)
+    assert_equal({"message" => "test1"}, emits[0][2])
+    assert_equal({"message" => "test2"}, emits[1][2])
+    assert_equal({"message" => "test3"}, emits[2][2])
+    assert_equal({"message" => "test4"}, emits[3][2])
+  end
+
+  def test_rotate_file
+    emits = sub_test_rotate_file(SINGLE_LINE_CONFIG)
+    assert(emits.length > 0)
+    assert_equal({"message" => "test3"}, emits[0][2])
+    assert_equal({"message" => "test4"}, emits[1][2])
+    assert_equal({"message" => "test5"}, emits[2][2])
+    assert_equal({"message" => "test6"}, emits[3][2])
+  end
+
+  def test_rotate_file_with_read_from_head
+    emits = sub_test_rotate_file(CONFIG_READ_FROM_HEAD + SINGLE_LINE_CONFIG)
+    assert(emits.length > 0)
+    assert_equal({"message" => "test1"}, emits[0][2])
+    assert_equal({"message" => "test2"}, emits[1][2])
+    assert_equal({"message" => "test3"}, emits[2][2])
+    assert_equal({"message" => "test4"}, emits[3][2])
+    assert_equal({"message" => "test5"}, emits[4][2])
+    assert_equal({"message" => "test6"}, emits[5][2])
+  end
+
+  def sub_test_rotate_file(config = nil)
+    File.open("#{TMP_DIR}/tail.txt", "w") {|f|
+      f.puts "test1"
+      f.puts "test2"
+    }
+    d = create_driver(config)
+    d.run do
+      sleep 1
+
+      File.open("#{TMP_DIR}/tail.txt", "a") {|f|
+        f.puts "test3"
+        f.puts "test4"
+      }
+      sleep 1
+
+      FileUtils.mv("#{TMP_DIR}/tail.txt", "#{TMP_DIR}/tail2.txt")
+      sleep 1
+
+      File.open("#{TMP_DIR}/tail.txt", "w") {|f| }
+      sleep 1
+
+      File.open("#{TMP_DIR}/tail.txt", "a") {|f|
+        f.puts "test5"
+        f.puts "test6"
+      }
+      sleep 1
+    end
+
+    d.run do
+      sleep 1
+    end
+
+    d.emits
   end
 
   def test_lf
@@ -79,7 +167,7 @@ class TailInputTest < Test::Unit::TestCase
 
     emits = d.emits
     assert_equal(true, emits.length > 0)
-    assert_equal({"message"=>"test3test4"}, emits[0][2])
+    assert_equal({"message" => "test3test4"}, emits[0][2])
   end
 
   def test_whitespace
@@ -103,12 +191,12 @@ class TailInputTest < Test::Unit::TestCase
 
     emits = d.emits
     assert_equal(true, emits.length > 0)
-    assert_equal({"message"=>"    "}, emits[0][2])
-    assert_equal({"message"=>"    4 spaces"}, emits[1][2])
-    assert_equal({"message"=>"4 spaces    "}, emits[2][2])
-    assert_equal({"message"=>"	"}, emits[3][2])
-    assert_equal({"message"=>"	tab"}, emits[4][2])
-    assert_equal({"message"=>"tab	"}, emits[5][2])
+    assert_equal({"message" => "    "}, emits[0][2])
+    assert_equal({"message" => "    4 spaces"}, emits[1][2])
+    assert_equal({"message" => "4 spaces    "}, emits[2][2])
+    assert_equal({"message" => "	"}, emits[3][2])
+    assert_equal({"message" => "	tab"}, emits[4][2])
+    assert_equal({"message" => "tab	"}, emits[5][2])
   end
 
   # multiline mode test
@@ -207,6 +295,33 @@ class TailInputTest < Test::Unit::TestCase
     assert_equal({"message" => "test4"}, emits[3][2])
   end
 
+  def test_multiline_without_firstline
+    File.open("#{TMP_DIR}/tail.txt", "w") { |f| }
+
+    d = create_driver %[
+      format multiline
+      format1 /(?<var1>foo \\d)\\n/
+      format2 /(?<var2>bar \\d)\\n/
+      format3 /(?<var3>baz \\d)/
+    ]
+    d.run do
+      File.open("#{TMP_DIR}/tail.txt", "a") { |f|
+        f.puts "foo 1"
+        f.puts "bar 1"
+        f.puts "baz 1"
+        f.puts "foo 2"
+        f.puts "bar 2"
+        f.puts "baz 2"
+      }
+      sleep 1
+    end
+
+    emits = d.emits
+    assert_equal(2, emits.length)
+    assert_equal({"var1" => "foo 1", "var2" => "bar 1", "var3" => "baz 1"}, emits[0][2])
+    assert_equal({"var1" => "foo 2", "var2" => "bar 2", "var3" => "baz 2"}, emits[1][2])
+  end
+
   # * path test
   # TODO: Clean up tests
   EX_RORATE_WAIT = 0
@@ -247,7 +362,7 @@ class TailInputTest < Test::Unit::TestCase
 
       flexstub(Fluent::NewTailInput::TailWatcher) do |watcherclass|
         EX_PATHS.each do |path|
-          watcherclass.should_receive(:new).with(path, EX_RORATE_WAIT, Fluent::NewTailInput::FilePositionEntry, any, any, any).once.and_return do
+          watcherclass.should_receive(:new).with(path, EX_RORATE_WAIT, Fluent::NewTailInput::FilePositionEntry, any, true, any, any).once.and_return do
             flexmock('TailWatcher') { |watcher|
               watcher.should_receive(:attach).once
               watcher.should_receive(:unwatched=).zero_or_more_times
@@ -263,7 +378,7 @@ class TailInputTest < Test::Unit::TestCase
       end
 
       flexstub(Fluent::NewTailInput::TailWatcher) do |watcherclass|
-        watcherclass.should_receive(:new).with('test/plugin/data/2010/01/20100102-030406.log', EX_RORATE_WAIT, Fluent::NewTailInput::FilePositionEntry, any, any, any).once.and_return do
+        watcherclass.should_receive(:new).with('test/plugin/data/2010/01/20100102-030406.log', EX_RORATE_WAIT, Fluent::NewTailInput::FilePositionEntry, any, true, any, any).once.and_return do
           flexmock('TailWatcher') do |watcher|
             watcher.should_receive(:attach).once
             watcher.should_receive(:unwatched=).zero_or_more_times
@@ -368,8 +483,8 @@ class TailInputTest < Test::Unit::TestCase
       end
       emits = d.emits
       assert_equal(2, emits.length)
-      assert_equal({"message"=>"test3"}, emits[0][2])
-      assert_equal({"message"=>"test4"}, emits[1][2])
+      assert_equal({"message" => "test3"}, emits[0][2])
+      assert_equal({"message" => "test4"}, emits[1][2])
     end
   end
 end
