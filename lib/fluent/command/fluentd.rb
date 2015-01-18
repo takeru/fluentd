@@ -19,6 +19,7 @@
 require 'optparse'
 require 'fluent/log'
 require 'fluent/env'
+require 'fluent/supervisor'
 require 'fluent/version'
 require 'windows/library'
 include Windows::Library
@@ -28,24 +29,7 @@ $fluentdargv = Marshal.load(Marshal.dump(ARGV))
 op = OptionParser.new
 op.version = Fluent::VERSION
 
-# default values
-opts = {
-  :config_path => Fluent::DEFAULT_CONFIG_PATH,
-  :plugin_dirs => [Fluent::DEFAULT_PLUGIN_DIR],
-  :log_level => Fluent::Log::LEVEL_INFO,
-  :log_path => nil,
-  :daemonize => false,
-  :libs => [],
-  :setup_path => nil,
-  :chuser => nil,
-  :chgroup => nil,
-  :suppress_interval => 0,
-  :suppress_repeated_stacktrace => false,
-  :use_v1_config => false,
-  :usespawn => 0,
-  :signame => nil,
-  :winsvcreg => nil,
-}
+opts = Fluent::Supervisor.default_options
 
 op.on('-s', "--setup [DIR=#{File.dirname(Fluent::DEFAULT_CONFIG_PATH)}]", "install sample configuration file to the directory") {|s|
   opts[:setup_path] = s || File.dirname(Fluent::DEFAULT_CONFIG_PATH)

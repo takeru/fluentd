@@ -65,6 +65,25 @@ class HttpInputTest < Test::Unit::TestCase
     }
   end
 
+  def test_multi_json
+    d = create_driver
+
+    time = Time.parse("2011-01-02 13:14:15 UTC").to_i
+
+    events = [{"a"=>1},{"a"=>2}]
+    tag = "tag1"
+
+    events.each { |ev|
+      d.expect_emit tag, time, ev
+    }
+
+    d.run do
+      res = post("/#{tag}", {"json"=>events.to_json, "time"=>time.to_s})
+      assert_equal "200", res.code
+    end
+
+  end
+
   def test_json_with_add_http_headers
     d = create_driver(CONFIG + "add_http_headers true")
 
@@ -95,10 +114,7 @@ class HttpInputTest < Test::Unit::TestCase
 
     d.run do
       d.expected_emits.each {|tag,time,record|
-        http = Net::HTTP.new("127.0.0.1", PORT)
-        req = Net::HTTP::Post.new("/#{tag}?time=#{time.to_s}", {"content-type"=>"application/json; charset=utf-8"})
-        req.body = record.to_json
-        res = http.request(req)
+        res = post("/#{tag}?time=#{time.to_s}", record.to_json, {"content-type"=>"application/json; charset=utf-8"})
         assert_equal "200", res.code
       }
     end
@@ -120,10 +136,77 @@ class HttpInputTest < Test::Unit::TestCase
     end
   end
 
-  def post(path, params)
+  def test_multi_msgpack
+    d = create_driver
+
+    time = Time.parse("2011-01-02 13:14:15 UTC").to_i
+
+    events = [{"a"=>1},{"a"=>2}]
+    tag = "tag1"
+
+    events.each { |ev|
+      d.expect_emit tag, time, ev
+    }
+
+    d.run do
+      res = post("/#{tag}", {"msgpack"=>events.to_msgpack, "time"=>time.to_s})
+      assert_equal "200", res.code
+    end
+
+  end
+
+  def test_with_regexp
+    d = create_driver(CONFIG + %[
+      format /^(?<field_1>\\d+):(?<field_2>\\w+)$/
+      types field_1:integer
+    ])
+
+    time = Time.parse("2011-01-02 13:14:15 UTC").to_i
+
+    d.expect_emit "tag1", time, {"field_1" => 1, "field_2" => 'str'}
+    d.expect_emit "tag2", time, {"field_1" => 2, "field_2" => 'str'}
+
+    d.run do
+      d.expected_emits.each { |tag, time, record|
+        body = record.map { |k, v|
+          v.to_s
+        }.join(':')
+        res = post("/#{tag}?time=#{time.to_s}", body)
+        assert_equal "200", res.code
+      }
+    end
+  end
+
+  def test_with_csv
+    require 'csv'
+
+    d = create_driver(CONFIG + %[
+      format csv
+      keys foo,bar
+    ])
+
+    time = Time.parse("2011-01-02 13:14:15 UTC").to_i
+
+    d.expect_emit "tag1", time, {"foo" => "1", "bar" => 'st"r'}
+    d.expect_emit "tag2", time, {"foo" => "2", "bar" => 'str'}
+
+    d.run do
+      d.expected_emits.each { |tag, time, record|
+        body = record.map { |k, v| v }.to_csv
+        res = post("/#{tag}?time=#{time.to_s}", body)
+        assert_equal "200", res.code
+      }
+    end
+  end
+
+  def post(path, params, header = {})
     http = Net::HTTP.new("127.0.0.1", PORT)
-    req = Net::HTTP::Post.new(path, {})
-    req.set_form_data(params)
+    req = Net::HTTP::Post.new(path, header)
+    if params.is_a?(String)
+      req.body = params
+    else
+      req.set_form_data(params)
+    end
     http.request(req)
   end
 

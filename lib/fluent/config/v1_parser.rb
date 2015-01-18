@@ -94,23 +94,38 @@ module Fluent
             e_attrs, e_elems = parse_element(false, e_name)
             elems << Element.new(e_name, e_arg, e_attrs, e_elems)
 
-          elsif root_element && skip(/\@include#{SPACING}/)
-            uri = scan_string(LINE_END)
-            eval_include(attrs, elems, uri)
-            line_end
+          elsif root_element && skip(/(\@include|include)#{SPACING}/)
+            if !prev_match.start_with?('@')
+              $log.warn "'include' is deprecated. Use '@include' instead"
+            end
+            parse_include(attrs, elems)
 
           else
             k = scan_string(SPACING)
             spacing
-            v = parse_literal
-            unless line_end
-              parse_error! "expected end of line"
+            if prev_match.include?("\n") # support 'tag_mapped' like "without value" configuration
+              attrs[k] = ""
+            else
+              if k == '@include'
+                parse_include(attrs, elems)
+              else
+                v = parse_literal
+                unless line_end
+                  parse_error! "expected end of line"
+                end
+                attrs[k] = v
+              end
             end
-            attrs[k] = v
           end
         end
 
         return attrs, elems
+      end
+
+      def parse_include(attrs, elems)
+        uri = scan_string(LINE_END)
+        eval_include(attrs, elems, uri)
+        line_end
       end
 
       def eval_include(attrs, elems, uri)
@@ -123,12 +138,12 @@ module Fluent
             pattern = path
           end
 
-          Dir.glob(pattern).each { |path|
+          Dir.glob(pattern).sort.each { |path|
             basepath = File.dirname(path)
             fname = File.basename(path)
             data = File.read(path)
             ss = StringScanner.new(data)
-            V1Parser.new(ss, basepath, fname, @eval_context).parse(true, nil, attrs, elems)
+            V1Parser.new(ss, basepath, fname, @eval_context).parse_element(true, nil, attrs, elems)
           }
 
         else
@@ -136,9 +151,9 @@ module Fluent
           fname = path
           require 'open-uri'
           data = nil
-          open(uri) { |f| read = f.read }
+          open(uri) { |f| data = f.read }
           ss = StringScanner.new(data)
-          V1Parser.new(ss, basepath, fname, @eval_context).parse(true, nil, attrs, elems)
+          V1Parser.new(ss, basepath, fname, @eval_context).parse_element(true, nil, attrs, elems)
         end
 
       rescue SystemCallError => e

@@ -338,7 +338,7 @@ module Fluent
     extend Forwardable
     def_delegators '@logger', :enable_color?, :enable_debug, :enable_event,
       :disable_events, :tag, :tag=, :time_format, :time_format=,
-      :event, :caller_line, :puts, :write, :flush
+      :event, :caller_line, :puts, :write, :flush, :out, :out=
   end
 
 
@@ -361,7 +361,9 @@ module Fluent
       super
 
       if @log_level
-        @log = PluginLogger.new($log)
+        unless @log.is_a?(PluginLogger)
+          @log = PluginLogger.new($log)
+        end
         @log.level = @log_level
       end
     end

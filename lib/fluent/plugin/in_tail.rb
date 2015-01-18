@@ -150,7 +150,11 @@ module Fluent
         if @pf
           pe = @pf[path]
           if @read_from_head && pe.read_inode.zero?
-            pe.update(File::Stat.new(path).ino, 0)
+            begin
+              pe.update(File::Stat.new(path).ino, 0)
+            rescue Errno::ENOENT
+              $log.warn "#{path} not found. Continuing without tailing it."
+            end
           end
         end
 
@@ -198,7 +202,7 @@ module Fluent
         time, record = parse_line(lb)
         if time && record
           tag = if @tag_prefix || @tag_suffix
-                  @tag_prefix + tail_watcher.tag + @tag_suffix
+                  @tag_prefix + tw.tag + @tag_suffix
                 else
                   @tag
                 end
